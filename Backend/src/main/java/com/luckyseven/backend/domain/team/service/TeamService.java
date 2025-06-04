@@ -8,6 +8,7 @@ import com.luckyseven.backend.domain.expense.repository.ExpenseRepository;
 import com.luckyseven.backend.domain.member.entity.Member;
 import com.luckyseven.backend.domain.member.repository.MemberRepository;
 import com.luckyseven.backend.domain.member.service.utill.MemberDetails;
+import com.luckyseven.backend.domain.team.cache.TeamDashboardCacheService;
 import com.luckyseven.backend.domain.team.dto.TeamCreateRequest;
 import com.luckyseven.backend.domain.team.dto.TeamCreateResponse;
 import com.luckyseven.backend.domain.team.dto.TeamDashboardResponse;
@@ -152,14 +153,24 @@ public class TeamService {
         .collect(Collectors.toList());
   }
 
+  private final TeamDashboardCacheService teamDashboardCache;
+
   /**
    * 대시보드를 가져온다.
+   * 캐시된 값이 있으면 캐시에서 반환하고, 없으면 DB에서 조회 후 캐시에 저장한다.
    *
    * @param teamId 팀의 ID
    * @return 팀 대시보드
    */
   @Transactional(readOnly = true)
   public TeamDashboardResponse getTeamDashboard(Long teamId) {
+    // 캐시에서 대시보드 데이터 조회
+    TeamDashboardResponse cachedDashboardResponse = teamDashboardCache.getCachedTeamDashboard(teamId);
+    if (cachedDashboardResponse != null) {
+      return cachedDashboardResponse;
+    }
+
+    // 캐시에 없는 경우 DB에서 조회
     Team team = teamRepository.findById(teamId)
         .orElseThrow(() -> new CustomLogicException(ExceptionCode.TEAM_NOT_FOUND,
             "ID가 [%d]인 팀을 찾을 수 없습니다", teamId));
@@ -173,7 +184,40 @@ public class TeamService {
     List<CategoryExpenseSum> categoryExpenseSums = expenseRepository.findCategoryExpenseSumsByTeamId(
         teamId).orElse(null);
 
-    return TeamMapper.toTeamDashboardResponse(team, budget, recentExpenses, categoryExpenseSums);
+    TeamDashboardResponse dashboardResponse = TeamMapper.toTeamDashboardResponse(
+        team, budget, recentExpenses, categoryExpenseSums);
+
+    // 결과를 캐시에 저장
+    teamDashboardCache.cacheTeamDashboard(teamId, dashboardResponse);
+
+    return dashboardResponse;
+  }
+
+  /**
+   * 팀 대시보드 데이터를 최신화하고 캐시에 저장한다.
+   * 지출 변경 시 호출되어 대시보드 데이터를 갱신한다.
+   *
+   * @param teamId 팀 ID
+   */
+  @Transactional(readOnly = true)
+  public void refreshTeamDashboard(Long teamId) {
+    Team team = teamRepository.findById(teamId)
+        .orElseThrow(() -> new CustomLogicException(ExceptionCode.TEAM_NOT_FOUND,
+            "ID가 [%d]인 팀을 찾을 수 없습니다", teamId));
+
+    Budget budget = budgetRepository.findByTeamId(teamId).orElse(null);
+
+    Pageable pageable = PageRequest.of(0, 5, Sort.by("createdAt").descending());
+    Page<Expense> expensePage = expenseRepository.findByTeamId(teamId, pageable);
+    List<Expense> recentExpenses = expensePage.getContent();
+    List<CategoryExpenseSum> categoryExpenseSums = expenseRepository.findCategoryExpenseSumsByTeamId(
+        teamId).orElse(null);
+
+    TeamDashboardResponse dashboardResponse = TeamMapper.toTeamDashboardResponse(
+        team, budget, recentExpenses, categoryExpenseSums);
+
+    // 갱신된 데이터를 캐시에 저장
+    teamDashboardCache.cacheTeamDashboard(teamId, dashboardResponse);
   }
 
 }

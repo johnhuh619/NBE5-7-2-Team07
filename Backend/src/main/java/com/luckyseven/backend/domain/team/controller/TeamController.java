@@ -237,8 +237,21 @@ public class TeamController {
   )
   @GetMapping("/{teamId}/dashboard")
   public ResponseEntity<TeamDashboardResponse> getTeamDashboard(@PathVariable Long teamId) {
+    long startTime = System.currentTimeMillis();
+    boolean isCached = false;
+
     TeamDashboardResponse dashboardResponse = teamService.getTeamDashboard(teamId);
-    return ResponseEntity.ok(dashboardResponse);
+
+    // 이 요청이 캐시에서 제공되었는지 체크 (응답 시간이 10ms 미만이면 캐시된 것으로 간주)
+    long responseTime = System.currentTimeMillis() - startTime;
+    if (responseTime < 10) {
+      isCached = true;
+    }
+
+    return ResponseEntity.ok()
+        .header("X-Response-Time-Ms", String.valueOf(responseTime))
+        .header("X-Cached-Response", String.valueOf(isCached))
+        .body(dashboardResponse);
   }
 }
 

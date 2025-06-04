@@ -18,6 +18,7 @@ import com.luckyseven.backend.domain.member.service.MemberService;
 import com.luckyseven.backend.domain.settlements.app.SettlementService;
 import com.luckyseven.backend.domain.team.entity.Team;
 import com.luckyseven.backend.domain.team.repository.TeamRepository;
+import com.luckyseven.backend.domain.team.service.TeamService;
 import com.luckyseven.backend.sharedkernel.cache.CacheEvictService;
 import com.luckyseven.backend.sharedkernel.dto.PageResponse;
 import com.luckyseven.backend.sharedkernel.exception.CustomLogicException;
@@ -41,6 +42,8 @@ public class ExpenseService {
   private final SettlementService settlementService;
   private final CacheEvictService cacheEvictService;
 
+  private final TeamService teamService;
+
   @Transactional
   public CreateExpenseResponse saveExpense(Long teamId, ExpenseRequest request) {
     Team team = findTeamOrThrow(teamId);
@@ -54,6 +57,10 @@ public class ExpenseService {
 
     settlementService.createAllSettlements(request, payer, saved);
     evictRecentExpensesForTeam(teamId);
+
+    // 지출 등록 후 대시보드 데이터 갱신 및 캐싱
+    teamService.refreshTeamDashboard(teamId);
+
     return ExpenseMapper.toCreateExpenseResponse(saved, budget);
   }
 
@@ -84,7 +91,12 @@ public class ExpenseService {
     updateBudget(delta, method, budget);
 
     expense.update(request.description(), newAmount, request.category());
-    evictRecentExpensesForTeam(expense.getTeam().getId());
+    Long teamId = expense.getTeam().getId();
+    evictRecentExpensesForTeam(teamId);
+
+//    // 지출 수정 후 대시보드 데이터 갱신 및 캐싱
+//    teamService.refreshTeamDashboard(teamId);
+
     return ExpenseMapper.toCreateExpenseResponse(expense, budget);
   }
 
@@ -101,6 +113,10 @@ public class ExpenseService {
     expenseRepository.delete(expense);
 
     evictRecentExpensesForTeam(teamId);
+
+//    // 지출 삭제 후 대시보드 데이터 갱신 및 캐싱
+//    teamService.refreshTeamDashboard(teamId);
+
     return ExpenseMapper.toExpenseBalanceResponse(budget);
   }
 
