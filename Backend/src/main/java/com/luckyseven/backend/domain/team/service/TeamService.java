@@ -21,10 +21,15 @@ import com.luckyseven.backend.domain.team.repository.TeamRepository;
 import com.luckyseven.backend.domain.team.util.TeamMapper;
 import com.luckyseven.backend.sharedkernel.exception.CustomLogicException;
 import com.luckyseven.backend.sharedkernel.exception.ExceptionCode;
+
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
+
 import lombok.RequiredArgsConstructor;
+import org.hibernate.annotations.Cache;
+import org.springframework.cache.annotation.CachePut;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -37,36 +42,36 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class TeamService {
 
-  private final TeamRepository teamRepository;
-  private final TeamMemberRepository teamMemberRepository;
-  private final MemberRepository memberRepository;
-  private final BudgetRepository budgetRepository;
-  private final ExpenseRepository expenseRepository;
-  private final BCryptPasswordEncoder passwordEncoder;
+    private final TeamRepository teamRepository;
+    private final TeamMemberRepository teamMemberRepository;
+    private final MemberRepository memberRepository;
+    private final BudgetRepository budgetRepository;
+    private final ExpenseRepository expenseRepository;
+    private final BCryptPasswordEncoder passwordEncoder;
 
 
-  /**
-   * 팀을 생성한다. 생성한 회원을 팀 리더로 등록한다
-   *
-   * @param request 팀 생성 요청
-   * @return 생성된 팀 정보
-   */
-  @Transactional
-  public TeamCreateResponse createTeam(MemberDetails memberDetails
-      , TeamCreateRequest request) {
+    /**
+     * 팀을 생성한다. 생성한 회원을 팀 리더로 등록한다
+     *
+     * @param request 팀 생성 요청
+     * @return 생성된 팀 정보
+     */
+    @Transactional
+    public TeamCreateResponse createTeam(MemberDetails memberDetails
+            , TeamCreateRequest request) {
 
-    Long memberId = memberDetails.getId();
-    Member creator = memberRepository.findById(memberId)
-        .orElseThrow(() -> new CustomLogicException(ExceptionCode.MEMBER_ID_NOTFOUND, memberId));
+        Long memberId = memberDetails.getId();
+        Member creator = memberRepository.findById(memberId)
+                .orElseThrow(() -> new CustomLogicException(ExceptionCode.MEMBER_ID_NOTFOUND, memberId));
 
-    String teamCode = generateTeamCode();
-    Team team = TeamMapper.toTeamEntity(request, creator, teamCode);
-    creator.addLeadingTeam(team);
-    Team savedTeam = teamRepository.save(team);
-    TeamMember teamMember = TeamMapper.toTeamMemberEntity(creator, savedTeam);
+        String teamCode = generateTeamCode();
+        Team team = TeamMapper.toTeamEntity(request, creator, teamCode);
+        creator.addLeadingTeam(team);
+        Team savedTeam = teamRepository.save(team);
+        TeamMember teamMember = TeamMapper.toTeamMemberEntity(creator, savedTeam);
 
-    // 리더를 TeamMember 에 추가
-    teamMemberRepository.save(teamMember);
+        // 리더를 TeamMember 에 추가
+        teamMemberRepository.save(teamMember);
 
 //    // <TODO> 예산 생성(임시로 구현)
 //    Budget budget = Budget.builder()
@@ -83,141 +88,119 @@ public class TeamService {
 //    savedTeam.setBudget(savedBudget);
 //    savedBudget.setTeam(savedTeam);
 
-    savedTeam.addTeamMember(teamMember);
-    return TeamMapper.toTeamCreateResponse(savedTeam);
-  }
-
-  /**
-   * 멤버가 팀 코드와 팀 pwd를 입력하여 팀에 가입한다.
-   *
-   * @param teamCode     팀 코드
-   * @param teamPassword 팀 pwd
-   * @return 가입된 팀의 정보
-   * @throws IllegalArgumentException 비밀번호 일치 실패 에러.
-   */
-  @Transactional
-  public TeamJoinResponse joinTeam(MemberDetails memberDetails, String teamCode,
-      String teamPassword) {
-
-    Long memberId = memberDetails.getId();
-    Member member = memberRepository.findById(memberId)
-        .orElseThrow(() -> new CustomLogicException(ExceptionCode.MEMBER_ID_NOTFOUND, memberId));
-
-    Team team = teamRepository.findByTeamCode(teamCode)
-        .orElseThrow(() -> new CustomLogicException(ExceptionCode.TEAM_NOT_FOUND,
-            "팀 코드가 [%s]인 팀을 찾을 수 없습니다", teamCode));
-
-    if (!team.getTeamPassword().equals(teamPassword)) {
-      throw new IllegalArgumentException("비밀번호 일치 실패.");
+        savedTeam.addTeamMember(teamMember);
+        return TeamMapper.toTeamCreateResponse(savedTeam);
     }
 
-    boolean isAlreadyJoined = teamMemberRepository.existsByTeamAndMember(team, member);
-    if (isAlreadyJoined) {
-      throw new CustomLogicException(ExceptionCode.ALREADY_TEAM_MEMBER,
-          "회원 ID [%d]는 이미 팀 ID [%d]에 가입되어 있습니다", member.getId(), team.getId());
+    /**
+     * 멤버가 팀 코드와 팀 pwd를 입력하여 팀에 가입한다.
+     *
+     * @param teamCode     팀 코드
+     * @param teamPassword 팀 pwd
+     * @return 가입된 팀의 정보
+     * @throws IllegalArgumentException 비밀번호 일치 실패 에러.
+     */
+    @Transactional
+    public TeamJoinResponse joinTeam(MemberDetails memberDetails, String teamCode,
+                                     String teamPassword) {
+
+        Long memberId = memberDetails.getId();
+        Member member = memberRepository.findById(memberId)
+                .orElseThrow(() -> new CustomLogicException(ExceptionCode.MEMBER_ID_NOTFOUND, memberId));
+
+        Team team = teamRepository.findByTeamCode(teamCode)
+                .orElseThrow(() -> new CustomLogicException(ExceptionCode.TEAM_NOT_FOUND,
+                        "팀 코드가 [%s]인 팀을 찾을 수 없습니다", teamCode));
+
+        if (!team.getTeamPassword().equals(teamPassword)) {
+            throw new IllegalArgumentException("비밀번호 일치 실패.");
+        }
+
+        boolean isAlreadyJoined = teamMemberRepository.existsByTeamAndMember(team, member);
+        if (isAlreadyJoined) {
+            throw new CustomLogicException(ExceptionCode.ALREADY_TEAM_MEMBER,
+                    "회원 ID [%d]는 이미 팀 ID [%d]에 가입되어 있습니다", member.getId(), team.getId());
+        }
+
+        TeamMember teamMember = TeamMapper.toTeamMemberEntity(member, team);
+        TeamMember savedTeamMember = teamMemberRepository.save(teamMember);
+
+        team.addTeamMember(savedTeamMember);
+        member.addTeamMember(savedTeamMember);
+
+        if (!savedTeamMember.getTeam().getId().equals(team.getId()) ||
+                !savedTeamMember.getMember().getId().equals(member.getId())) {
+            throw new CustomLogicException(ExceptionCode.INTERNAL_SERVER_ERROR,
+                    "팀 멤버 관계 설정에 실패했습니다");
+        }
+
+        return TeamMapper.toTeamJoinResponse(team);
     }
 
-    TeamMember teamMember = TeamMapper.toTeamMemberEntity(member, team);
-    TeamMember savedTeamMember = teamMemberRepository.save(teamMember);
-
-    team.addTeamMember(savedTeamMember);
-    member.addTeamMember(savedTeamMember);
-
-    if (!savedTeamMember.getTeam().getId().equals(team.getId()) ||
-        !savedTeamMember.getMember().getId().equals(member.getId())) {
-      throw new CustomLogicException(ExceptionCode.INTERNAL_SERVER_ERROR,
-          "팀 멤버 관계 설정에 실패했습니다");
+    /**
+     * 팀 코드를 생성한다
+     *
+     * @return 생성된 팀 코드
+     */
+    private String generateTeamCode() {
+        return UUID.randomUUID().toString().substring(0, 8);
     }
 
-    return TeamMapper.toTeamJoinResponse(team);
-  }
 
-  /**
-   * 팀 코드를 생성한다
-   *
-   * @return 생성된 팀 코드
-   */
-  private String generateTeamCode() {
-    return UUID.randomUUID().toString().substring(0, 8);
-  }
+    @Transactional(readOnly = true)
+    public List<TeamListResponse> getTeamsByMemberId(Long memberId) {
+        Member member = memberRepository.findById(memberId)
+                .orElseThrow(() -> new CustomLogicException(ExceptionCode.MEMBER_ID_NOTFOUND, memberId));
 
-
-  @Transactional(readOnly = true)
-  public List<TeamListResponse> getTeamsByMemberId(Long memberId) {
-    Member member = memberRepository.findById(memberId)
-        .orElseThrow(() -> new CustomLogicException(ExceptionCode.MEMBER_ID_NOTFOUND, memberId));
-
-    List<TeamMember> teamMembers = teamMemberRepository.findByMemberId(memberId);
-    return teamMembers.stream()
-        .map(teamMember -> TeamMapper.toTeamListResponse(teamMember.getTeam()))
-        .collect(Collectors.toList());
-  }
-
-  private final TeamDashboardCacheService teamDashboardCache;
-
-  /**
-   * 대시보드를 가져온다.
-   * 캐시된 값이 있으면 캐시에서 반환하고, 없으면 DB에서 조회 후 캐시에 저장한다.
-   *
-   * @param teamId 팀의 ID
-   * @return 팀 대시보드
-   */
-  @Transactional(readOnly = true)
-  public TeamDashboardResponse getTeamDashboard(Long teamId) {
-    // 캐시에서 대시보드 데이터 조회
-    TeamDashboardResponse cachedDashboardResponse = teamDashboardCache.getCachedTeamDashboard(teamId);
-    if (cachedDashboardResponse != null) {
-      return cachedDashboardResponse;
+        List<TeamMember> teamMembers = teamMemberRepository.findByMemberId(memberId);
+        return teamMembers.stream()
+                .map(teamMember -> TeamMapper.toTeamListResponse(teamMember.getTeam()))
+                .collect(Collectors.toList());
     }
 
-    // 캐시에 없는 경우 DB에서 조회
-    Team team = teamRepository.findById(teamId)
-        .orElseThrow(() -> new CustomLogicException(ExceptionCode.TEAM_NOT_FOUND,
-            "ID가 [%d]인 팀을 찾을 수 없습니다", teamId));
+    private final TeamDashboardCacheService teamDashboardCache;
 
-    // 예산이 없는 경우 null로 처리 (Optional 사용)
-    Budget budget = budgetRepository.findByTeamId(teamId).orElse(null);
 
-    Pageable pageable = PageRequest.of(0, 5, Sort.by("createdAt").descending());
-    Page<Expense> expensePage = expenseRepository.findByTeamId(teamId, pageable);
-    List<Expense> recentExpenses = expensePage.getContent();
-    List<CategoryExpenseSum> categoryExpenseSums = expenseRepository.findCategoryExpenseSumsByTeamId(
-        teamId).orElse(null);
 
-    TeamDashboardResponse dashboardResponse = TeamMapper.toTeamDashboardResponse(
-        team, budget, recentExpenses, categoryExpenseSums);
+    private TeamDashboardResponse createTeamDashboard(Long teamId) {
+        Team team = teamRepository.findById(teamId)
+                .orElseThrow(() -> new CustomLogicException(ExceptionCode.TEAM_NOT_FOUND,
+                        "ID가 [%d]인 팀을 찾을 수 없습니다", teamId));
 
-    // 결과를 캐시에 저장
-    teamDashboardCache.cacheTeamDashboard(teamId, dashboardResponse);
+        // 예산이 없는 경우 null로 처리 (Optional 사용)
+        Budget budget = budgetRepository.findByTeamId(teamId).orElse(null);
 
-    return dashboardResponse;
-  }
+        Pageable pageable = PageRequest.of(0, 5, Sort.by("createdAt").descending());
+        Page<Expense> expensePage = expenseRepository.findByTeamId(teamId, pageable);
+        List<Expense> recentExpenses = expensePage.getContent();
+        List<CategoryExpenseSum> categoryExpenseSums = expenseRepository.findCategoryExpenseSumsByTeamId(
+                teamId).orElse(null);
+        return TeamMapper.toTeamDashboardResponse(
+                team, budget, recentExpenses, categoryExpenseSums);
+    }
+    /**
+     * 대시보드를 가져온다.
+     * 캐시된 값이 있으면 캐시에서 반환하고, 없으면 DB에서 조회 후 캐시에 저장한다.
+     *
+     * @param teamId 팀의 ID
+     * @return 팀 대시보드
+     */
+    @Transactional(readOnly = true)
+    @Cacheable(value = "teamDashboard", key = "#teamId")
+    public TeamDashboardResponse getTeamDashboard(Long teamId) {
+        return createTeamDashboard(teamId);
+    }
 
-  /**
-   * 팀 대시보드 데이터를 최신화하고 캐시에 저장한다.
-   * 지출 변경 시 호출되어 대시보드 데이터를 갱신한다.
-   *
-   * @param teamId 팀 ID
-   */
-  @Transactional(readOnly = true)
-  public void refreshTeamDashboard(Long teamId) {
-    Team team = teamRepository.findById(teamId)
-        .orElseThrow(() -> new CustomLogicException(ExceptionCode.TEAM_NOT_FOUND,
-            "ID가 [%d]인 팀을 찾을 수 없습니다", teamId));
-
-    Budget budget = budgetRepository.findByTeamId(teamId).orElse(null);
-
-    Pageable pageable = PageRequest.of(0, 5, Sort.by("createdAt").descending());
-    Page<Expense> expensePage = expenseRepository.findByTeamId(teamId, pageable);
-    List<Expense> recentExpenses = expensePage.getContent();
-    List<CategoryExpenseSum> categoryExpenseSums = expenseRepository.findCategoryExpenseSumsByTeamId(
-        teamId).orElse(null);
-
-    TeamDashboardResponse dashboardResponse = TeamMapper.toTeamDashboardResponse(
-        team, budget, recentExpenses, categoryExpenseSums);
-
-    // 갱신된 데이터를 캐시에 저장
-    teamDashboardCache.cacheTeamDashboard(teamId, dashboardResponse);
-  }
+    /**
+     * 팀 대시보드 데이터를 최신화하고 캐시에 저장한다.
+     * 지출 변경 시 호출되어 대시보드 데이터를 갱신한다.
+     *
+     * @param teamId 팀 ID
+     */
+    @Transactional(readOnly = true)
+    @CachePut(value = "teamDashboard", key = "#teamId")
+    public void refreshTeamDashboard(Long teamId) {
+        createTeamDashboard(teamId);
+    }
 
 }

@@ -76,6 +76,7 @@ class ExpenseServiceTest {
   private Member settler1;
   private Member settler2;
 
+
   @BeforeEach
   void setUp() {
     budget = Budget.builder()
