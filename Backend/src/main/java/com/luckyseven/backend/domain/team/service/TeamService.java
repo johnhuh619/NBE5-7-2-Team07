@@ -9,11 +9,7 @@ import com.luckyseven.backend.domain.member.entity.Member;
 import com.luckyseven.backend.domain.member.repository.MemberRepository;
 import com.luckyseven.backend.domain.member.service.utill.MemberDetails;
 import com.luckyseven.backend.domain.team.cache.TeamDashboardCacheService;
-import com.luckyseven.backend.domain.team.dto.TeamCreateRequest;
-import com.luckyseven.backend.domain.team.dto.TeamCreateResponse;
-import com.luckyseven.backend.domain.team.dto.TeamDashboardResponse;
-import com.luckyseven.backend.domain.team.dto.TeamJoinResponse;
-import com.luckyseven.backend.domain.team.dto.TeamListResponse;
+import com.luckyseven.backend.domain.team.dto.*;
 import com.luckyseven.backend.domain.team.entity.Team;
 import com.luckyseven.backend.domain.team.entity.TeamMember;
 import com.luckyseven.backend.domain.team.repository.TeamMemberRepository;
@@ -21,22 +17,19 @@ import com.luckyseven.backend.domain.team.repository.TeamRepository;
 import com.luckyseven.backend.domain.team.util.TeamMapper;
 import com.luckyseven.backend.sharedkernel.exception.CustomLogicException;
 import com.luckyseven.backend.sharedkernel.exception.ExceptionCode;
-
-import java.util.List;
-import java.util.UUID;
-import java.util.stream.Collectors;
-
 import lombok.RequiredArgsConstructor;
-import org.hibernate.annotations.Cache;
-import org.springframework.cache.annotation.CachePut;
-import org.springframework.cache.annotation.Cacheable;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -72,21 +65,6 @@ public class TeamService {
 
         // 리더를 TeamMember 에 추가
         teamMemberRepository.save(teamMember);
-
-//    // <TODO> 예산 생성(임시로 구현)
-//    Budget budget = Budget.builder()
-//        .foreignCurrency(com.luckyseven.backend.domain.budget.entity.CurrencyCode.KRW) // Set default currency to KRW
-//        .balance(BigDecimal.ZERO)
-//        .foreignBalance(BigDecimal.ZERO)
-//        .totalAmount(BigDecimal.ZERO)
-//        .avgExchangeRate(BigDecimal.ONE)
-//        .setBy(memberId) // Set the creator as the setter
-//        .build();
-//
-//    // Team이 Budget의 주인이므로, Team 에서 Budget set
-//    Budget savedBudget = budgetRepository.save(budget);
-//    savedTeam.setBudget(savedBudget);
-//    savedBudget.setTeam(savedTeam);
 
         savedTeam.addTeamMember(teamMember);
         return TeamMapper.toTeamCreateResponse(savedTeam);
@@ -158,49 +136,70 @@ public class TeamService {
                 .collect(Collectors.toList());
     }
 
-    private final TeamDashboardCacheService teamDashboardCache;
+    private final TeamDashboardCacheService teamDashboardCacheService;
 
+    /**
+     * 팀 대시보드를 조회합니다.
+     * 캐시된 데이터가 있고 Budget의 updatedAt과 일치하면 캐시에서 반환,
+     * 그렇지 않으면 데이터베이스에서 조회하여 캐시에 저장 후 반환합니다.
+     *
+     * @param teamId 팀 ID
+     * @return 팀 대시보드 응답
+     */
+    @Transactional(readOnly = true)
+    public TeamDashboardResponse getTeamDashboard(Long teamId) {
+        // 1. 캐시에서 대시보드 데이터 조회
+        TeamDashboardResponse cachedDashboard = teamDashboardCacheService.getCachedTeamDashboard(teamId);
 
+        // 2. 캐시가 있으면 Budget의 updatedAt 확인
+        if (cachedDashboard != null) {
+            Optional<LocalDateTime> latestBudgetUpdate = budgetRepository.findUpdatedAtByTeamId(teamId);
 
-    private TeamDashboardResponse createTeamDashboard(Long teamId) {
+            // 3. Budget의 updatedAt이 있고 캐시의 updatedAt과 일치하면 캐시 사용
+            if (latestBudgetUpdate.isPresent() &&
+                    cachedDashboard.getUpdatedAt() != null &&
+                    latestBudgetUpdate.get().equals(cachedDashboard.getUpdatedAt())) {
+                return cachedDashboard;
+            }
+        }
+
+        // 4. 캐시가 없거나 updatedAt이 다르면 새로 조회하여 캐시 갱신
+        return refreshTeamDashboard(teamId);
+    }
+
+    /**
+     * 팀 대시보드를 새로 조회하여 캐시에 저장합니다.
+     *
+     * @param teamId 팀 ID
+     * @return 팀 대시보드 응답
+     */
+    @Transactional(readOnly = true)
+    public TeamDashboardResponse refreshTeamDashboard(Long teamId) {
+        // 팀 및 예산 정보 조회
         Team team = teamRepository.findById(teamId)
                 .orElseThrow(() -> new CustomLogicException(ExceptionCode.TEAM_NOT_FOUND,
                         "ID가 [%d]인 팀을 찾을 수 없습니다", teamId));
 
-        // 예산이 없는 경우 null로 처리 (Optional 사용)
+        // 예산 조회 (없으면 null)
         Budget budget = budgetRepository.findByTeamId(teamId).orElse(null);
 
+        // 최근 지출 내역 조회
         Pageable pageable = PageRequest.of(0, 5, Sort.by("createdAt").descending());
-        Page<Expense> expensePage = expenseRepository.findByTeamId(teamId, pageable);
-        List<Expense> recentExpenses = expensePage.getContent();
-        List<CategoryExpenseSum> categoryExpenseSums = expenseRepository.findCategoryExpenseSumsByTeamId(
-                teamId).orElse(null);
-        return TeamMapper.toTeamDashboardResponse(
+        List<Expense> recentExpenses = expenseRepository.findByTeamId(teamId, pageable).getContent();
+
+        // 카테고리별 지출 합계 조회
+        List<CategoryExpenseSum> categoryExpenseSums =
+                expenseRepository.findCategoryExpenseSumsByTeamId(teamId).orElse(null);
+
+        // 대시보드 응답 생성
+        TeamDashboardResponse dashboard = TeamMapper.toTeamDashboardResponse(
                 team, budget, recentExpenses, categoryExpenseSums);
-    }
-    /**
-     * 대시보드를 가져온다.
-     * 캐시된 값이 있으면 캐시에서 반환하고, 없으면 DB에서 조회 후 캐시에 저장한다.
-     *
-     * @param teamId 팀의 ID
-     * @return 팀 대시보드
-     */
-    @Transactional(readOnly = true)
-    @Cacheable(value = "teamDashboard", key = "#teamId")
-    public TeamDashboardResponse getTeamDashboard(Long teamId) {
-        return createTeamDashboard(teamId);
+
+        // 캐시에 저장
+        teamDashboardCacheService.cacheTeamDashboard(teamId, dashboard);
+
+        return dashboard;
     }
 
-    /**
-     * 팀 대시보드 데이터를 최신화하고 캐시에 저장한다.
-     * 지출 변경 시 호출되어 대시보드 데이터를 갱신한다.
-     *
-     * @param teamId 팀 ID
-     */
-    @Transactional(readOnly = true)
-    @CachePut(value = "teamDashboard", key = "#teamId")
-    public void refreshTeamDashboard(Long teamId) {
-        createTeamDashboard(teamId);
-    }
 
 }
