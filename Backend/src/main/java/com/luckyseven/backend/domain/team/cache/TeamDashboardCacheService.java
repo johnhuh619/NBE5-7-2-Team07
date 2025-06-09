@@ -1,6 +1,9 @@
 package com.luckyseven.backend.domain.team.cache;
 
 import com.luckyseven.backend.domain.team.dto.TeamDashboardResponse;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
@@ -19,6 +22,16 @@ public class TeamDashboardCacheService {
     private final CacheManager cacheManager;
     private static final String CACHE_NAME = "teamDashboards";
     private static final String KEY_PREFIX = "team:dashboard:";
+
+    private final MeterRegistry meterRegistry;
+    private Counter cacheHitCounter;
+    private Counter cacheMissCounter;
+
+    @PostConstruct
+    private void initCounters() {
+        cacheHitCounter = meterRegistry.counter("team_dashboard_cache_hit_total");
+        cacheMissCounter = meterRegistry.counter("team_dashboard_cache_miss_total");
+    }
 
     /**
      * 팀 대시보드 데이터를 캐시에 저장
@@ -46,9 +59,11 @@ public class TeamDashboardCacheService {
             String key = KEY_PREFIX + teamId;
             Cache.ValueWrapper valueWrapper = cache.get(key);
             if (valueWrapper != null) {
+                cacheHitCounter.increment();
                 return (TeamDashboardResponse) valueWrapper.get();
             }
         }
+        cacheMissCounter.increment();
         return null;
     }
 

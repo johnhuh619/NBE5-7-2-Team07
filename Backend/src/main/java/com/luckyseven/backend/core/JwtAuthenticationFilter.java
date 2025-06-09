@@ -26,62 +26,78 @@ import java.io.IOException;
 @Component
 @RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
-  private final JwtTokenizer jwtTokenizer;
-  private final CustomAuthenticationEntryPoint authenticationEntryPoint;
-  private final PathMatcher pathMatcher;
+    private final JwtTokenizer jwtTokenizer;
+    private final CustomAuthenticationEntryPoint authenticationEntryPoint;
+    private final PathMatcher pathMatcher;
 
-  @Override
-  protected boolean shouldNotFilter(HttpServletRequest request){
+    @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
 //    if (HttpMethod.GET.matches(request.getMethod()) && pathMatcher.match("/api/teams/**",
 //        request.getRequestURI())) {
 //      return true;
 //    }
-    String path = request.getRequestURI();
-    return path.startsWith("/api/users/");
-  }
-
-
-  @Override
-  protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
-      FilterChain filterChain) throws ServletException, IOException {
-    String accessToken = resolveToken(request);
-    try{
-      if(StringUtils.hasText(accessToken)){
-        Claims claims = jwtTokenizer.parseAccessToken(accessToken);
-        setAuthenticationToContext(claims);
-        log.info("[JwtAuthenticationFilter] doFilterInternal = {}", claims);
-
-      }else{
-        throw new CustomLogicException(ExceptionCode.JWT_TOKEN_NOT_FOUND);
-      }
-    }catch(AuthenticationException ex){
-      SecurityContextHolder.clearContext();
-      authenticationEntryPoint.commence(request,response,ex);
-      return;
+        String path = request.getRequestURI();
+        return path.startsWith("/api/users/");
     }
-    filterChain.doFilter(request,response);
 
-  }
 
-  private void setAuthenticationToContext(Claims claims){
-    Long memberId = Long.parseLong(claims.getSubject());
-    String email =  claims.get("email").toString();
-    String nickName= claims.get("nickname").toString();
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
+                                    FilterChain filterChain) throws ServletException, IOException {
+        String uri = request.getRequestURI();
+        System.out.println("JwtAuthFilter: uri=" + uri);
 
-    MemberDetails userDetails = new MemberDetails(memberId," ",email, nickName);
+        if (
+                uri.equals("/")||
+                uri.startsWith("/error") ||
+                        uri.startsWith("/signup") ||
+                        uri.startsWith("/login") ||
+                        uri.equals("/actuator/prometheus") ||
+                        uri.equals("/actuator/health") ||
+                        uri.equals("/actuator/info")
+        ) {
+            filterChain.doFilter(request, response);
+            return;
+        }
 
-    log.info("userDetails UserDetails.memberId ={} , UserDetails.email ={}, nickName ={}",memberId,email,nickName);
+        String accessToken = resolveToken(request);
+        try {
+            if (StringUtils.hasText(accessToken)) {
+                Claims claims = jwtTokenizer.parseAccessToken(accessToken);
+                setAuthenticationToContext(claims);
+                log.info("[JwtAuthenticationFilter] doFilterInternal = {}", claims);
 
-    Authentication authentication = new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
-    SecurityContextHolder.getContext().setAuthentication(authentication);
-  }
+            } else {
+                throw new CustomLogicException(ExceptionCode.JWT_TOKEN_NOT_FOUND);
+            }
+        } catch (AuthenticationException ex) {
+            SecurityContextHolder.clearContext();
+            authenticationEntryPoint.commence(request, response, ex);
+            return;
+        }
+        filterChain.doFilter(request, response);
 
-  private String resolveToken(HttpServletRequest request) {
-    String bearerToken = request.getHeader("Authorization");
-
-    if( bearerToken != null && bearerToken.startsWith("Bearer ")) {
-      return bearerToken.substring(7);
     }
-    return null;
-  }
+
+    private void setAuthenticationToContext(Claims claims) {
+        Long memberId = Long.parseLong(claims.getSubject());
+        String email = claims.get("email").toString();
+        String nickName = claims.get("nickname").toString();
+
+        MemberDetails userDetails = new MemberDetails(memberId, " ", email, nickName);
+
+        log.info("userDetails UserDetails.memberId ={} , UserDetails.email ={}, nickName ={}", memberId, email, nickName);
+
+        Authentication authentication = new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+    }
+
+    private String resolveToken(HttpServletRequest request) {
+        String bearerToken = request.getHeader("Authorization");
+
+        if (bearerToken != null && bearerToken.startsWith("Bearer ")) {
+            return bearerToken.substring(7);
+        }
+        return null;
+    }
 }
