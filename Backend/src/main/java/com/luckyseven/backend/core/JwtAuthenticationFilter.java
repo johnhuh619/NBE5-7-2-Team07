@@ -31,13 +31,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final PathMatcher pathMatcher;
 
     @Override
-    protected boolean shouldNotFilter(HttpServletRequest request) {
-//    if (HttpMethod.GET.matches(request.getMethod()) && pathMatcher.match("/api/teams/**",
-//        request.getRequestURI())) {
-//      return true;
-//    }
+    protected boolean shouldNotFilter(HttpServletRequest request) throws ServletException {
+        String uri = request.getRequestURI();
+
+        // 1. /api/teams/{숫자}/dashboard (숫자만 허용, 더 넓게 하려면 .* 도 OK)
+        if (uri.matches("^/api/teams/\\d+/dashboard$")) {
+            return true;  // 필터 적용 안 함 (=토큰 없이 접근 허용)
+        }
+
         String path = request.getRequestURI();
-        return path.startsWith("/api/users/");
+        return false;
     }
 
 
@@ -54,7 +57,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         uri.startsWith("/login") ||
                         uri.equals("/actuator/prometheus") ||
                         uri.equals("/actuator/health") ||
-                        uri.equals("/actuator/info")
+                        uri.equals("/actuator/info") ||
+                        uri.startsWith("/api/teams")
         ) {
             filterChain.doFilter(request, response);
             return;

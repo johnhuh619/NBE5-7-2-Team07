@@ -8,4 +8,4 @@ class TeamDashboardUser(HttpUser):
     @task
     def get_team_dashboard(self):
         for _ in range(2000):    # 2,000회 반복 호출
-            self.client.get(f"/api/team/{self.team_id}/dashboard")
+            self.client.get(f"/api/teams/{self.team_id}/dashboard")

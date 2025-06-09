@@ -55,9 +55,9 @@ public class SecurityConfig {
                                 "/actuator/prometheus",          // 혹시 actuator 세부 경로만 노출시, 명시적으로 추가
                                 "/actuator/health",
                                 "/actuator/info",
-                                "/error"
+                                "/error",
+                                "/api/teams/**"
                                 ).permitAll()
-
                         .anyRequest().authenticated())
                 .addFilterBefore(new JwtAuthenticationFilter(jwtTokenizer, customAuthenticationEntryPoint,
                                 new AntPathMatcher()),
