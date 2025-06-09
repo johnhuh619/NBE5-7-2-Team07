@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.when;
 
 import com.luckyseven.backend.domain.budget.dao.BudgetRepository;
+import com.luckyseven.backend.domain.budget.dto.BudgetUpdateRequest;
 import com.luckyseven.backend.domain.budget.entity.Budget;
 import com.luckyseven.backend.domain.budget.entity.CurrencyCode;
 import com.luckyseven.backend.sharedkernel.exception.CustomLogicException;
@@ -65,6 +66,20 @@ class BudgetValidatorTests {
           budgetValidator.validateBudgetExist(teamId);
         }
     ).isInstanceOf(CustomLogicException.class);
+
+  }
+
+  @Test
+  @DisplayName("validateRequest(BudgetUpdateRequest)는 isExchanged가 null이어도 예외를 발생시키지 않는다")
+  void validateRequest_update_request_with_null_isExchanged_should_not_throw() {
+    BudgetUpdateRequest request = new BudgetUpdateRequest(
+        BigDecimal.valueOf(1000),
+        null,
+        null,
+        null
+    );
+
+    assertDoesNotThrow(() -> budgetValidator.validateRequest(request));
 
   }
 }
