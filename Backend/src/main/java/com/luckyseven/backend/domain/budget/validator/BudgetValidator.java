@@ -29,7 +29,7 @@ public class BudgetValidator {
   public Budget validateBudgetExist(Long teamId) {
     return budgetRepository.findByTeamId(teamId)
         .orElseThrow(() ->
-            new CustomLogicException(ExceptionCode.TEAM_NOT_FOUND, "teamId: " + teamId)
+            new CustomLogicException(ExceptionCode.BUDGET_NOT_FOUND, "teamId: " + teamId)
         );
   }
 
@@ -52,7 +52,10 @@ public class BudgetValidator {
     }
   }
 
-  private void validateIsExchangedRequest(boolean isExchanged, BigDecimal exchangeRate) {
+  private void validateIsExchangedRequest(Boolean isExchanged, BigDecimal exchangeRate) {
+    if (isExchanged == null) {
+      return;
+    }
     if (Boolean.TRUE.equals(isExchanged) && exchangeRate == null) {
       throw new CustomLogicException(ExceptionCode.BAD_REQUEST, "환전 여부가 true인데 환율이 없습니다.");
     }
